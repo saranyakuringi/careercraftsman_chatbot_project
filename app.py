@@ -255,7 +255,7 @@ def extract_resume_text_pdf(uploaded_file):
 
 client = OpenAI(
     # This is the default and can be omitted
-    api_key='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'
+    api_key='Your_API_KEY'
 )
 def get_resume_summary(resume_text):
     try:
