@@ -12,6 +12,8 @@ import nltk
 import docx
 import requests
 from openai import OpenAI
+import PyPDF2
+from io import BytesIO
 
 import numpy as np
 
@@ -190,7 +192,7 @@ if "username" in st.session_state:
 
 
 # Function to extract text from Word resume
-def extract_resume_text(uploaded_file):
+def extract_resume_text_word(uploaded_file):
     try:
         doc = docx.Document(uploaded_file)
         text = ""
@@ -201,11 +203,59 @@ def extract_resume_text(uploaded_file):
     except Exception as e:
         st.error(f"Error extracting text from Word resume: {e}")
         return None
+
+
+
+def extract_resume_text_pdf(uploaded_file):
+    try:
+        # Open the PDF file
+        with open(uploaded_file, 'rb') as file:
+            pdf_reader = PyPDF2.PdfFileReader(file)
+            
+            # Initialize an empty string to store the text
+            text = ""
+            
+            # Loop through each page in the PDF
+            for page_num in range(pdf_reader.numPages):
+                # Extract text from the current page
+                page = pdf_reader.getPage(page_num)
+                text += page.extractText() + "\n"
+            
+            return text
+    except Exception as e:
+        st.error(f"Error extracting text from PDF resume: {e}")
+        return None
     
+
+
+def extract_resume_text_pdf(uploaded_file):
+    try:
+        # Create a BytesIO object to read the uploaded file content
+        pdf_file = BytesIO(uploaded_file.read())
+        
+        # Open the PDF file
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        
+        # Initialize an empty string to store the text
+        text = ""
+        
+        # Loop through each page in the PDF
+        for page_num in range(len(pdf_reader.pages)):
+            # Extract text from the current page
+            page = pdf_reader.pages[page_num]
+            text += page.extract_text() + "\n"
+        
+        # Close the BytesIO object
+        pdf_file.close()
+        
+        return text
+    except Exception as e:
+        st.error(f"Error extracting text from PDF resume: {e}")
+        return None
 
 client = OpenAI(
     # This is the default and can be omitted
-    api_key='Your_API_KEY'
+    api_key='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'
 )
 def get_resume_summary(resume_text):
     try:
@@ -359,7 +409,7 @@ if "username" in st.session_state:
     if uploaded_file is not None:
         st.write("File Uploaded Successfully")
 
-    submit1 = st.button("T")
+    submit1 = st.button("Tell me about the Resume")
     submit2 = st.button("Percentage Match")
     submit3 = st.button("Sample Interview Questions")
     submit4 = st.button("Resume Points Update")
@@ -368,9 +418,9 @@ if "username" in st.session_state:
     if submit1:
         if uploaded_file is not None:
             if uploaded_file.type == "application/pdf":
-                resume_text = extract_resume_text(uploaded_file)
+                resume_text = extract_resume_text_pdf(uploaded_file)
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                resume_text = extract_resume_text(uploaded_file)
+                resume_text = extract_resume_text_word(uploaded_file)
             else:
                 st.write("Unsupported file format. Please upload a PDF or Word document.")      
 
@@ -391,7 +441,15 @@ if "username" in st.session_state:
     elif submit2:
         if input_text and uploaded_file:
             # Extract text from uploaded resume
-            resume_text = extract_resume_text(uploaded_file)
+            # resume_text = extract_resume_text(uploaded_file)
+
+            if uploaded_file.type == "application/pdf":
+                resume_text = extract_resume_text_pdf(uploaded_file)
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                resume_text = extract_resume_text_word(uploaded_file)
+            else:
+                st.write("Unsupported file format. Please upload a PDF or Word document.")      
+
             
             if resume_text:
                 # Calculate percentage match
