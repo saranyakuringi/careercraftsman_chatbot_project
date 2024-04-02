@@ -257,6 +257,7 @@ client = OpenAI(
     # This is the default and can be omitted
     api_key='Your_API_KEY'
 )
+
 def get_resume_summary(resume_text):
     try:
         prompt = "Generate the summary of the resume:" +  resume_text
