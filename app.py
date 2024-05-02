@@ -4,29 +4,44 @@ from psycopg2 import Error
 import bcrypt
 import os
 # from dotenv import load_dotenv
-from PIL import Image, ImageOps
-import base64
-import io
-import pdf2image
+# from PIL import Image, ImageOps
+# import base64
+# import io
+# import pdf2image
 import nltk
 import docx
-import requests
+# import requests
 from openai import OpenAI
 import PyPDF2
 from io import BytesIO
 
-import numpy as np
+# import numpy as np
 
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.pipeline import Pipeline
+import os
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, TrainingArguments, Trainer
 
-from sklearn.decomposition import TruncatedSVD
+
+import json
+
+# # import pandas as pd
+# from sklearn.feature_extraction.text import TfidfVectorizer
+# from sklearn.decomposition import LatentDirichletAllocation
+# from sklearn.pipeline import Pipeline
+
+# from sklearn.decomposition import TruncatedSVD
+
+# import openai
+
+
+# from transformers import GPT2Tokenizer, GPT2LMHeadModel
+# from transformers import TextDataset, DataCollatorForLanguageModeling
+from transformers import Trainer, TrainingArguments
+
+from transformers import GPT2Tokenizer
 
 
 
@@ -158,39 +173,6 @@ if "username" in st.session_state:
     if logout_button:
         logout_user()
 
-# # # Check if the user is logged in
-# if "username" not in st.session_state:
-#     # Display the login form
-#     st.subheader("Login")
-#     login_username = st.text_input("Username")
-#     login_password = st.text_input("Password", type="password")
-#     if st.button("Login"):
-#         if login_user(login_username, login_password):
-#             st.session_state["username"] = login_username  # Store username in session state
-#             st.success("Login successful")
-#             st.button("Logout")  # Display logout button after successful login
-#         else:
-#             # If login fails, display registration form
-            
-#             st.subheader("Register")
-#             first_name = st.text_input("First Name")
-#             last_name = st.text_input("Last Name")
-#             register_username = st.text_input("New Username")
-#             register_password = st.text_input("New Password", type="password")
-#             if st.button("Register"):
-#                 register_user(first_name, last_name, register_username, register_password)
-#     else:
-#         # If login button not clicked, don't display registration form
-#         st.subheader("Don't have an account?")
-#         st.write("Please register to access the chatbot.")
-#         st.button("Register")
-# else:
-#     # Display the logout button
-#     st.subheader(f"Welcome, {st.session_state['username']}!")  # Display welcome message
-#     if st.button("Logout"):
-#         logout_user()
-
-
 # Function to extract text from Word resume
 def extract_resume_text_word(uploaded_file):
     try:
@@ -203,29 +185,6 @@ def extract_resume_text_word(uploaded_file):
     except Exception as e:
         st.error(f"Error extracting text from Word resume: {e}")
         return None
-
-
-
-def extract_resume_text_pdf(uploaded_file):
-    try:
-        # Open the PDF file
-        with open(uploaded_file, 'rb') as file:
-            pdf_reader = PyPDF2.PdfFileReader(file)
-            
-            # Initialize an empty string to store the text
-            text = ""
-            
-            # Loop through each page in the PDF
-            for page_num in range(pdf_reader.numPages):
-                # Extract text from the current page
-                page = pdf_reader.getPage(page_num)
-                text += page.extractText() + "\n"
-            
-            return text
-    except Exception as e:
-        st.error(f"Error extracting text from PDF resume: {e}")
-        return None
-    
 
 
 def extract_resume_text_pdf(uploaded_file):
@@ -255,7 +214,8 @@ def extract_resume_text_pdf(uploaded_file):
 
 client = OpenAI(
     # This is the default and can be omitted
-    api_key='Your_API_KEY'
+    # api_key='Your_API_KEY'
+    api_key=''
 )
 
 def get_resume_summary(resume_text):
@@ -292,7 +252,7 @@ def calculate_percentage_match(job_description, resume):
     return round(percentage_match, 2)
 
 # Function to generate resume points based on job description
-def generate_resume_points(job_description):
+def generate_resume_points(input_text):
     try:
         prompt = "Generate resume points for the job description:" + input_text
 
@@ -343,63 +303,174 @@ def fetch_sample_questions(job_description):
     except Exception as e:
         print(f"Error: {e}")
         return []
-
     
-def train_model_with_samples(sample_questions):
+    
+import json
+import os
+from sklearn.metrics import accuracy_score, precision_score, f1_score
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, Trainer, TrainingArguments
+import matplotlib.pyplot as plt
+
+def fine_tune_gpt2_model(job_description, jsonl_file):
     try:
-        # Ensure sample_questions is not empty
-        if not sample_questions:
-            raise ValueError("No sample questions provided.")
+        # Check if the model is already fine-tuned
+        if not is_fine_tuned_model_exists():
+            # Load pre-trained GPT-2 tokenizer and model
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            tokenizer.pad_token = tokenizer.eos_token
 
-        training_data = [sample_questions]
+            # Set pad_token_id explicitly
+            tokenizer.pad_token_id = tokenizer.eos_token_id 
 
-        pipeline = Pipeline([
-            ('tfidf', TfidfVectorizer()),
-            ('lsa', TruncatedSVD(n_components=min(5, len(training_data)), random_state=42)),
-        ])
+            model = GPT2LMHeadModel.from_pretrained("gpt2")
 
-        # Fit the pipeline on the questions
-        pipeline.fit(training_data)
+            # Prepare dataset
+            samples = []
+            print("Reading JSONL file:", jsonl_file)
+            with open(jsonl_file, "r", encoding="utf-8") as file:
+                for line in file:
+                    sample = json.loads(line.strip())
+                    if sample["job_title"] == job_description:
+                        question = sample["question"]
+                        # Ensure all questions have the same length
+                        question = question[:tokenizer.model_max_length - 2]  # Subtract 2 for special tokens
+                        answer = sample["answer"]
+                        samples.append({"question": question, "answer": answer})
 
-        # Check if the model is trained
-        if pipeline is not None:
-            print("Model is trained successfully.")
-            return pipeline
+            if not samples:
+                print(f"No samples found for job description '{job_description}'")
+                return False
+
+            # Fine-tune the model using sample questions and answers
+            train_dataset = [{"input_ids": tokenizer.encode(sample["question"], padding="max_length", max_length=tokenizer.model_max_length, truncation=True),
+                            "labels": tokenizer.encode(sample["answer"], padding="max_length", max_length=tokenizer.model_max_length, truncation=True)}
+                            for sample in samples]
+            
+            training_args = TrainingArguments(
+                output_dir="C:/Users/saran/OneDrive/Desktop/botproject/output",
+                overwrite_output_dir=True,
+                num_train_epochs=5,
+                per_device_train_batch_size=8,  # Increase batch size
+                save_steps=10_000,
+                save_total_limit=2,
+                gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+                fp16=True,  # Use mixed precision training if possible
+                prediction_loss_only=True,  # Speed up training by only computing loss
+                logging_steps=500,  # Log training progress less frequently
+            )
+
+            trainer = Trainer(
+                model=model,
+                args=training_args,
+                train_dataset=train_dataset,
+            )
+
+            trainer.train()
+
+            # Save the fine-tuned model
+            trainer.save_model("C:/Users/saran/OneDrive/Desktop/botproject/fine_tuned_gpt2_model")
+
+            # Save the fine-tuned tokenizer
+            tokenizer.save_pretrained("C:/Users/saran/OneDrive/Desktop/botproject/fine_tuned_gpt2_model")
+
+            # Evaluate the fine-tuned model
+            eval_results = evaluate_fine_tuned_model(trainer, train_dataset)
+
+            # Plot evaluation metrics
+            plot_evaluation_metrics(eval_results)
+
+            return True
         else:
-            print("Model is not trained")
-            return None
+            print("Model is already fine-tuned. Skipping fine-tuning.")
+            return True
         
-    except Exception as e:
-        print(f"Error training model with samples: {e}")
-        return None
-
-
-
-def generate_sample_questions_and_answers(model, input_text):
-    try:
-        # Use the trained model to transform the input text
-        transformed_text = model['tfidf'].transform([input_text])
-
-        # Use the transformed text to generate sample interview questions
-        sample_questions = model['lsa'].transform(transformed_text)
-
-        # Find the dominant topic for each sample question
-        dominant_topics = np.argmax(sample_questions, axis=1)
-
-        # Format the sample questions and answers
-        formatted_questions = []
-        for i, topic_idx in enumerate(dominant_topics):
-            formatted_questions.append(f"Question {i + 1}: {input_text}?")
-
-        # Join the formatted questions into a single string
-        sample_questions_string = '\n\n'.join(formatted_questions)
-        # print(sample_questions_string)
-        return sample_questions_string
+    except FileNotFoundError as e:
+        print(f"Error: Input file not found at path '{jsonl_file}'")
+        return False
     
+    except Exception as e:
+        print(f"Error during fine-tuning: {e}")
+        return False
+
+def evaluate_fine_tuned_model(trainer, dataset):
+    # Evaluate the fine-tuned model on the dataset
+    eval_result = trainer.evaluate(eval_dataset=dataset)
+    predictions = trainer.predict(eval_dataset=dataset)
+
+    # Compute evaluation metrics
+    labels = [example["labels"] for example in dataset]
+    predicted_labels = predictions.predictions.argmax(-1)
+    accuracy = accuracy_score(labels, predicted_labels)
+    precision = precision_score(labels, predicted_labels, average='weighted')
+    f1 = f1_score(labels, predicted_labels, average='weighted')
+
+    eval_result['accuracy'] = accuracy
+    eval_result['precision'] = precision
+    eval_result['f1'] = f1
+
+    return eval_result
+
+def plot_evaluation_metrics(eval_results):
+    # Extract evaluation metrics
+    accuracy = eval_results['accuracy']
+    precision = eval_results['precision']
+    f1 = eval_results['f1']
+
+    # Define labels and values for the metrics
+    metrics = ['Accuracy', 'Precision', 'F1 Score']
+    values = [accuracy, precision, f1]
+
+    # Plot the metrics
+    plt.figure(figsize=(8, 6))
+    plt.bar(metrics, values, color=['blue', 'green', 'orange'])
+    plt.title('Evaluation Metrics')
+    plt.xlabel('Metrics')
+    plt.ylabel('Values')
+    plt.ylim(0, 1)  # Set y-axis limit to range [0, 1] for accuracy, precision, and F1 score
+    plt.show()
+
+
+def generate_sample_questions_and_answers(job_description):
+    try:
+        # Load fine-tuned GPT-2 tokenizer and model
+        tokenizer = GPT2Tokenizer.from_pretrained("./fine_tuned_gpt2_model")
+        model = GPT2LMHeadModel.from_pretrained("./fine_tuned_gpt2_model")
+
+        # Define prompt for generating sample questions and answers
+        prompt = f"Generate sample interview questions and answers based on the following job description:\n\n{job_description}\n\nQuestion:\n1.\nAnswer:\n1."
+
+        # Generate sample questions and answers
+        input_ids = tokenizer.encode(prompt, return_tensors="pt")
+        outputs = model.generate(input_ids, max_length=300, num_return_sequences=5, do_sample=True)
+
+        sample_questions = []
+        sample_answers = []
+        for output in outputs:
+            text = tokenizer.decode(output, skip_special_tokens=True)
+            print("Generated Text:", text)  # Debugging output
+
+            parts = text.split("Answer:", 1)
+            if len(parts) == 2:
+                question = parts[0].strip()
+                answer = parts[1].strip()
+
+                # Remove prompt from question and answer
+                sample_questions.append(question)
+                sample_answers.append(answer)
+                                
+            else:
+                print("Error: Unable to split text into question and answer.")
+                print("Text:", text)
+
+        return sample_questions, sample_answers
     except Exception as e:
         print(f"Error generating sample questions and answers: {e}")
-        return ""
+        return [], []
 
+def is_fine_tuned_model_exists():
+    # Check if the fine-tuned model directory exists
+    model_directory = "C:/Users/saran/OneDrive/Desktop/botproject/fine_tuned_gpt2_model"  # Path to the directory where the fine-tuned model is saved
+    return os.path.exists(model_directory)
 
 # Display main functionality
 if "username" in st.session_state:
@@ -461,39 +532,58 @@ if "username" in st.session_state:
         else:
             st.write("Please provide both the job description and upload the resume")
 
-    
+
+    # elif submit3:
+    #     # Fetch sample questions
+    #     sample_questions = fetch_sample_questions(input_text)
+        
+    #     if sample_questions:
+    #         # Save sample questions to a text file
+    #         sample_questions_file = "./sample_questions.txt"
+    #         save_sample_questions_to_file(sample_questions.split("\n"), sample_questions_file)
+    #         # Fine-tune GPT-2 model using sample questions
+    #         print("Fine-tuning GPT-2 model...")
+    #         if fine_tune_gpt2_model(sample_questions_file):
+    #             st.write("Fine-tuning complete.")
+    #             #st.write("Sample Questions and Answers:")
+    #             #st.write(sample_questions)
+    #             # Generate sample questions and answers
+    #             sample_questions, sample_answers = generate_sample_questions_and_answers(input_text)
+
+    #             if sample_questions and sample_answers:
+    #                 st.write("Sample Interview Questions and Answers:")
+    #                 for i, (question, answer) in enumerate(zip(sample_questions, sample_answers), start=1):
+    #                     st.write(f"Question {i}: {question}")
+    #                     st.write(f"Answer {i}: {answer}")
+    #             else:
+    #                 print("Failed to generate sample questions and answers.")
+    #         else:
+    #             print("Error occurred during fine-tuning.")
+    #     else:
+    #         print("Failed to fetch sample questions.")
+
     elif submit3:
-        # Fetch sample questions
+        data_jsonl_file = "C:/Users/saran/OneDrive/Desktop/botproject/data.jsonl"
+        print("Data JSONL File Path:", data_jsonl_file)
         sample_questions = fetch_sample_questions(input_text)
-        # print(type(sample_questions))
-        if sample_questions:
-            # Display sample questions and answers
-            st.write("Sample Questions and Answers:")
-            st.write(sample_questions)
+        st.write("Sample Questions and Answers:")
+        st.write(sample_questions)
+    # Fetch sample questions and answers
+        if fine_tune_gpt2_model(input_text, data_jsonl_file):
+            print("Fine-tuning complete.")
+            # Generate sample questions and answers
+            sample_questions, sample_answers = generate_sample_questions_and_answers(input_text)
 
-            # Train model with fetched sample questions
-            model = train_model_with_samples(sample_questions)
-            print("model", model)
-
-            if model:
-                st.success("Model trained successfully.")
-
-                # Generate sample questions using the trained model
-                generated_questions = generate_sample_questions_and_answers(model, input_text)
-                if generated_questions:
-                    # st.write("Generated Sample Questions:")
-                    # st.write(generated_questions)
-                    print("Generated Sample Questions")
-                else:
-                    # st.error("Failed to generate sample questions.")
-                    print("Failed to generate sample questions")
+            if sample_questions and sample_answers:
+                st.write("Sample Interview Questions and Answers:")
+                for i, (question, answer) in enumerate(zip(sample_questions, sample_answers), start=1):
+                    print(f"Question {i}: {question}")
+                    print(f"Answer {i}: {answer}")
             else:
-                st.error("Failed to train the model.")
+                print("Failed to generate sample questions and answers.")
         else:
-            st.error("Failed to fetch sample questions.")
+            print("Error occurred during fine-tuning.")
 
-    
-    
     elif submit4:
         if input_text:
             # Generate resume points based on job description
@@ -504,5 +594,4 @@ if "username" in st.session_state:
         else:
             st.write("Please enter a job description before generating resume points.")
 
-    
 
